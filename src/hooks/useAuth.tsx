@@ -154,42 +154,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true
 
-    async function withTimeout<T>(promise: Promise<T>, timeout = 5000): Promise<T | null> {
-      let timer: ReturnType<typeof setTimeout>
-      const timeoutPromise = new Promise<null>(resolve => {
-        timer = setTimeout(() => resolve(null), timeout)
-      })
-      const result = await Promise.race([promise, timeoutPromise])
-      clearTimeout(timer!)
-      return result as T | null
-    }
-
     async function init() {
       try {
         console.log('🔐 Auth provider initializing...')
-        // First try to get session from cookies (most reliable after OAuth)
-        const userResult = await withTimeout(supabase.auth.getUser())
-        const sessionResult = await withTimeout(supabase.auth.getSession())
-        console.log('Auth init results:', { hasUser: !!userResult?.data?.user, hasSession: !!sessionResult?.data?.session })
-
-        const sbUser = userResult?.data?.user ?? null
-        const session = sessionResult?.data?.session ?? null
-
-        if (!mounted.current) return
-
-        if (session) {
-          setSession(session)
-          setSupabaseUser(session.user)
-        }
-
-        // If we found a user, fetch their profile
-        const activeUser = sbUser ?? session?.user ?? null
-        if (activeUser) {
-          setSupabaseUser(activeUser)
-          await fetchOrCreateProfile(activeUser)
-        } else {
-          // No session found
-          setLoading(false)
+        // Don't call getUser/getSession here — they would resolve before the listener fires
+        // Just set ready flag, listener will populate state
+        // But do a quick check to see if listener won't fire naturally
+        await new Promise(resolve => setTimeout(resolve, 100))
+        if (mounted.current) {
+          // If still loading after brief wait, it means listener will handle it
         }
       } catch (e) {
         console.warn('Auth init error:', e)
@@ -216,16 +189,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
           console.log('✅ Auth event:', event, 'user:', session?.user?.email)
           const sbUser = session?.user ?? null
           setSupabaseUser(sbUser)
           if (sbUser) {
             await fetchOrCreateProfile(sbUser)
+          } else {
+            if (mounted.current) setLoading(false)
           }
+        } else {
+          if (mounted.current) setLoading(false)
         }
-
-        if (mounted.current) setLoading(false)
       }
     )
 
