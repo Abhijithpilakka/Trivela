@@ -3,33 +3,22 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, X, ShoppingBag, Lock, User, LogOut, Home, Trophy, Zap, Info } from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
-import { AuthModal } from '../ui/AuthModal'
+import { Menu, X, ShoppingBag, Home, Trophy, Zap, Info } from 'lucide-react'
 import { SHOPIFY_URL } from '@/lib/data'
 import { clsx } from 'clsx'
 
 const NAV_ITEMS = [
-  { label: 'Home', href: '/', icon: Home, protected: false },
-  { label: 'Fan Arena', href: '/arena', icon: Trophy, protected: true },
-  { label: 'Predictions', href: '/predictions', icon: Trophy, protected: true },
-  { label: 'Trivia', href: '/trivia', icon: Zap, protected: true },
-  { label: 'About', href: '/about', icon: Info, protected: false },
+  { label: 'Home', href: '/', icon: Home },
+  { label: 'Fan Arena', href: '/arena', icon: Trophy },
+  { label: 'Predictions', href: '/predictions', icon: Trophy },
+  { label: 'Trivia', href: '/trivia', icon: Zap },
+  { label: 'About', href: '/about', icon: Info },
 ]
 
 export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [authOpen, setAuthOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-  const { user, loading, signOut, needsOnboarding } = useAuth()
   const pathname = usePathname()
-
-  // Auto-open modal if user logged in via Google but hasn't completed onboarding
-  useEffect(() => {
-    if (!loading && needsOnboarding) {
-      setAuthOpen(true)
-    }
-  }, [needsOnboarding, loading])
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40)
@@ -82,28 +71,6 @@ export function Navbar() {
               <ShoppingBag size={14} />
               Shop Kits
             </a>
-            {!loading && (
-              user ? (
-                <div className="flex items-center gap-2">
-                  <Link href="/profile" className="flex items-center gap-2 text-sm text-muted hover:text-linen transition-colors">
-                    <div className="w-7 h-7 rounded-full bg-gold/20 border border-gold/40 flex items-center justify-center">
-                      <span className="text-gold text-xs font-display">{user.fan_name?.[0]?.toUpperCase()}</span>
-                    </div>
-                  </Link>
-                  <button onClick={signOut} className="text-muted hover:text-red transition-colors">
-                    <LogOut size={16} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setAuthOpen(true)}
-                  className="flex items-center gap-2 text-sm font-body text-muted hover:text-linen border border-border hover:border-gold/50 px-3 py-2 rounded-md transition-all duration-200"
-                >
-                  <User size={14} />
-                  Sign In
-                </button>
-              )
-            )}
           </div>
 
           {/* Mobile hamburger */}
@@ -133,50 +100,23 @@ export function Navbar() {
             </button>
           </div>
 
-          {user && (
-            <div className="px-5 py-4 border-b border-border flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gold/20 border border-gold/40 flex items-center justify-center">
-                <span className="text-gold font-display">{user.fan_name?.[0]?.toUpperCase()}</span>
-              </div>
-              <div>
-                <p className="text-sm font-display text-linen">{user.fan_name}</p>
-                <p className="text-xs text-muted font-body">{user.supported_club}</p>
-              </div>
-            </div>
-          )}
-
           <nav className="flex-1 py-4 px-3">
             {NAV_ITEMS.map(item => {
               const Icon = item.icon
-              const locked = item.protected && !user
               return (
-                <div key={item.href}>
-                  {locked ? (
-                    <button
-                      onClick={() => { setMenuOpen(false); setAuthOpen(true) }}
-                      className="flex items-center justify-between w-full px-3 py-3.5 rounded-lg text-muted hover:text-linen hover:bg-surface transition-all group"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Icon size={16} />
-                        <span className="text-sm font-body">{item.label}</span>
-                      </div>
-                      <Lock size={12} className="text-border group-hover:text-muted transition-colors" />
-                    </button>
-                  ) : (
-                    <Link
-                      href={item.href}
-                      className={clsx(
-                        'flex items-center gap-3 px-3 py-3.5 rounded-lg text-sm font-body transition-all',
-                        pathname === item.href
-                          ? 'bg-gold/10 text-gold'
-                          : 'text-muted hover:text-linen hover:bg-surface'
-                      )}
-                    >
-                      <Icon size={16} />
-                      {item.label}
-                    </Link>
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={clsx(
+                    'flex items-center gap-3 px-3 py-3.5 rounded-lg text-sm font-body transition-all',
+                    pathname === item.href
+                      ? 'bg-gold/10 text-gold'
+                      : 'text-muted hover:text-linen hover:bg-surface'
                   )}
-                </div>
+                >
+                  <Icon size={16} />
+                  {item.label}
+                </Link>
               )
             })}
 
@@ -192,33 +132,8 @@ export function Navbar() {
               </a>
             </div>
           </nav>
-
-          <div className="p-4 border-t border-border">
-            {user ? (
-              <div className="flex gap-2">
-                <Link href="/profile" className="flex-1 text-center text-sm font-body text-muted border border-border hover:border-gold/50 hover:text-linen py-2.5 rounded-md transition-all">
-                  My Profile
-                </Link>
-                <button
-                  onClick={signOut}
-                  className="flex items-center justify-center gap-2 text-sm font-body text-red border border-red/30 hover:bg-red/10 px-3 py-2.5 rounded-md transition-all"
-                >
-                  <LogOut size={14} />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => { setMenuOpen(false); setAuthOpen(true) }}
-                className="w-full bg-gold text-pitch font-body font-medium text-sm py-3 rounded-md hover:bg-gold-light transition-all"
-              >
-                Sign In / Join
-              </button>
-            )}
-          </div>
         </div>
       </div>
-
-      <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
     </>
   )
 }
