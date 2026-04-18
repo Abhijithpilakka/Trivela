@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-const PROTECTED_ROUTES = ['/arena', '/predictions', '/trivia', '/profile']
-
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl
+  // Create a response we can modify
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  })
 
-  // Only run on protected routes
-  const isProtected = PROTECTED_ROUTES.some(route => pathname.startsWith(route))
-  if (!isProtected) return NextResponse.next()
-
-  let response = NextResponse.next({ request })
-
+  // Create Supabase client that can read/write cookies on this request/response
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -20,34 +18,43 @@ export async function middleware(request: NextRequest) {
         get(name: string) {
           return request.cookies.get(name)?.value
         },
-        set(name: string, value: string, options?: Record<string, unknown>) {
-          request.cookies.set({ name, value, ...options })
-          response = NextResponse.next({ request })
-          response.cookies.set({ name, value, ...options })
+        set(name: string, value: string, options: Record<string, unknown>) {
+          // Write cookie to the request so subsequent server code sees it
+          request.cookies.set({ name, value, ...(options as object) })
+          // Recreate response with updated request headers
+          response = NextResponse.next({
+            request: { headers: request.headers },
+          })
+          // Write cookie to the response so the browser saves it
+          response.cookies.set({ name, value, ...(options as object) })
         },
-        remove(name: string, options?: Record<string, unknown>) {
-          request.cookies.set({ name, value: '', ...options })
-          response = NextResponse.next({ request })
-          response.cookies.set({ name, value: '', ...options })
+        remove(name: string, options: Record<string, unknown>) {
+          request.cookies.set({ name, value: '', ...(options as object) })
+          response = NextResponse.next({
+            request: { headers: request.headers },
+          })
+          response.cookies.set({ name, value: '', ...(options as object) })
         },
       },
     }
   )
 
-  const { data: { session } } = await supabase.auth.getSession()
-
-  // No session — pages handle their own locked state UI (no hard redirect)
-  // This middleware just refreshes the session cookie if present
-  if (!session) {
-    // Let the page handle showing the locked/auth modal UI
-    return response
-  }
+  // IMPORTANT: This call refreshes the session if it's expired and
+  // writes the updated session cookies back. Must run on every request.
+  await supabase.auth.getUser()
 
   return response
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    /*
+     * Match every route EXCEPT:
+     * - _next/static (static files)
+     * - _next/image (image optimisation)
+     * - favicon.ico, favicon.svg
+     * - public image files
+     */
+    '/((?!_next/static|_next/image|favicon\\.ico|favicon\\.svg|robots\\.txt|.*\\.(?:png|jpg|jpeg|gif|webp|svg)$).*)',
   ],
 }

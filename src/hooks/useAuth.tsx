@@ -33,11 +33,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
+
+  // Create client once — stable reference
   const supabase = createClient()
 
-  async function fetchOrCreateProfile(sbUser: SupabaseUser): Promise<void> {
+  async function fetchOrCreateProfile(sbUser: SupabaseUser) {
     try {
-      // Try to fetch existing profile
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -45,57 +46,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single()
 
       if (data) {
-        // Profile exists — check if onboarding is complete
         setUser(data as User)
-        // If fan_name is default placeholder, trigger onboarding
-        const isDefault = !data.fan_name || data.fan_name === 'Fan' || data.fan_name === ''
-        setNeedsOnboarding(isDefault)
+        // Needs onboarding if fan_name or supported_club is empty
+        setNeedsOnboarding(!data.fan_name || !data.supported_club)
         return
       }
 
-      // No profile found (table might not exist yet, or new user)
-      if (error) {
-        // If table doesn't exist (42P01) or row not found (PGRST116), create minimal user object from auth data
-        if (error.code === 'PGRST116' || error.code === '42P01') {
-          // Try to insert the user first
-          const { data: inserted } = await supabase
-            .from('users')
-            .insert({
-              id: sbUser.id,
-              email: sbUser.email || '',
-              fan_name: sbUser.user_metadata?.full_name?.split(' ')[0] || '',
-              supported_club: '',
-              xp: 0,
-              level: 1,
-            })
-            .select()
-            .single()
-
-          if (inserted) {
-            setUser(inserted as User)
-            // New user via OAuth — needs onboarding if name/club not set
-            const isNew = !inserted.fan_name || !inserted.supported_club
-            setNeedsOnboarding(isNew)
-          } else {
-            // Table doesn't exist yet — build a partial user from auth data
-            // so they're not stuck logged out
-            const fallback: User = {
-              id: sbUser.id,
-              email: sbUser.email || '',
-              fan_name: sbUser.user_metadata?.full_name?.split(' ')[0] || '',
-              supported_club: '',
-              xp: 0,
-              level: 1,
-              created_at: new Date().toISOString(),
-            }
-            setUser(fallback)
-            setNeedsOnboarding(true)
-          }
+      // Row doesn't exist yet — insert it
+      if (error?.code === 'PGRST116') {
+        const newProfile = {
+          id: sbUser.id,
+          email: sbUser.email ?? '',
+          fan_name: sbUser.user_metadata?.full_name?.split(' ')[0] ?? '',
+          supported_club: '',
+          xp: 0,
+          level: 1,
         }
+        const { data: inserted } = await supabase
+          .from('users')
+          .insert(newProfile)
+          .select()
+          .single()
+
+        if (inserted) {
+          setUser(inserted as User)
+        } else {
+          // Fallback: use auth data directly so UI shows logged in
+          setUser({ ...newProfile, created_at: new Date().toISOString() } as User)
+        }
+        setNeedsOnboarding(true)
+        return
       }
+
+      // Any other error (e.g. table missing) — still show as logged in
+      setUser({
+        id: sbUser.id,
+        email: sbUser.email ?? '',
+        fan_name: sbUser.user_metadata?.full_name?.split(' ')[0] ?? '',
+        supported_club: '',
+        xp: 0,
+        level: 1,
+        created_at: new Date().toISOString(),
+      } as User)
+      setNeedsOnboarding(true)
+
     } catch (e) {
-      // Any unexpected error — still mark them as logged in via Supabase auth
-      console.warn('fetchOrCreateProfile error:', e)
+      console.warn('fetchOrCreateProfile failed:', e)
     }
   }
 
@@ -109,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('users')
       .upsert({
         id: supabaseUser.id,
-        email: supabaseUser.email || '',
+        email: supabaseUser.email ?? '',
         fan_name: fanName.trim(),
         supported_club: club,
         xp: 0,
@@ -123,25 +119,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // Initial session check
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setSupabaseUser(session?.user ?? null)
-      if (session?.user) {
-        fetchOrCreateProfile(session.user).finally(() => setLoading(false))
+    // getUser() is more reliable than getSession() for initial load after OAuth
+    supabase.auth.getUser().then(({ data: { user: sbUser } }) => {
+      if (sbUser) {
+        setSupabaseUser(sbUser)
+        // Also grab the session for the context
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          setSession(session)
+        })
+        fetchOrCreateProfile(sbUser).finally(() => setLoading(false))
       } else {
         setLoading(false)
       }
     })
 
-    // Listen for auth state changes (handles OAuth redirect completion)
+    // Listen for future auth changes (sign in, sign out, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setSession(session)
-        setSupabaseUser(session?.user ?? null)
+        const sbUser = session?.user ?? null
+        setSupabaseUser(sbUser)
 
-        if (session?.user) {
-          await fetchOrCreateProfile(session.user)
+        if (sbUser) {
+          await fetchOrCreateProfile(sbUser)
         } else {
           setUser(null)
           setNeedsOnboarding(false)
@@ -164,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user, supabaseUser, session, loading,
-      needsOnboarding, signOut, refreshUser, completeOnboarding
+      needsOnboarding, signOut, refreshUser, completeOnboarding,
     }}>
       {children}
     </AuthContext.Provider>
