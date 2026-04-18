@@ -166,9 +166,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function init() {
       try {
+        console.log('🔐 Auth provider initializing...')
         // First try to get session from cookies (most reliable after OAuth)
         const userResult = await withTimeout(supabase.auth.getUser())
         const sessionResult = await withTimeout(supabase.auth.getSession())
+        console.log('Auth init results:', { hasUser: !!userResult?.data?.user, hasSession: !!sessionResult?.data?.session })
 
         const sbUser = userResult?.data?.user ?? null
         const session = sessionResult?.data?.session ?? null
@@ -206,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(session)
 
         if (event === 'SIGNED_OUT') {
+          console.log('👋 User signed out')
           setUser(null)
           setSupabaseUser(null)
           setNeedsOnboarding(false)
@@ -214,6 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          console.log('✅ Auth event:', event, 'user:', session?.user?.email)
           const sbUser = session?.user ?? null
           setSupabaseUser(sbUser)
           if (sbUser) {

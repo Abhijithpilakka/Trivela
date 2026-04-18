@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/'
+  console.log('🔐 OAuth callback hit:', { code: code ? '***' : 'missing', next })
 
   if (!code) {
     console.error('No code in OAuth callback')
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
   const callbackBase = process.env.NEXT_PUBLIC_APP_URL || origin
   const redirectUrl = `${callbackBase.replace(/\/$/, '')}${next}`
 
+  // Keep track of cookies set by exchangeCodeForSession
+  const setCookies: Array<{ name: string; value: string; options?: any }> = []
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -24,7 +28,9 @@ export async function GET(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
-          // Store cookies on request so we can apply them to response later
+          // Store for later application to response
+          setCookies.push(...cookiesToSet)
+          // Also set on request so it's available for profile fetching
           cookiesToSet.forEach(({ name, value }) => {
             request.cookies.set(name, value)
           })
@@ -34,11 +40,13 @@ export async function GET(request: NextRequest) {
   )
 
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+  console.log('exchangeCodeForSession result:', { hasUser: !!data?.user, error: error?.message })
 
   if (error || !data.user) {
-    console.error('exchangeCodeForSession failed:', error?.message)
+    console.error('❌ exchangeCodeForSession failed:', error?.message)
     return NextResponse.redirect(`${origin}/auth/error`)
   }
+  console.log('✅ Session exchanged successfully for user:', data.user.email)
 
   // Profile row will be created by the DB trigger (handle_new_user).
   // We also try here as a safety net — errors are non-fatal.
@@ -61,10 +69,18 @@ export async function GET(request: NextRequest) {
 
   // Build response and copy ALL cookies from request (including those set by exchangeCodeForSession)
   const response = NextResponse.redirect(redirectUrl)
+  const allCookies = request.cookies.getAll()
+  console.log('📍 Cookies to set on response:', allCookies.map(c => c.name))
 
-  request.cookies.getAll().forEach(({ name, value }) => {
+  allCookies.forEach(({ name, value }) => {
     response.cookies.set(name, value)
   })
 
+  // Also apply any cookies that were stored with options from setCookies
+  setCookies.forEach(({ name, value, options }) => {
+    response.cookies.set(name, value, options)
+  })
+
+  console.log('🎯 Redirecting to:', redirectUrl)
   return response
 }
