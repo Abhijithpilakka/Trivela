@@ -73,43 +73,6 @@ export default function AboutPage() {
           </div>
         </AnimatedSection>
 
-        {/* Kit tiers explainer */}
-        <AnimatedSection>
-          <div>
-            <p className="text-xs font-body tracking-widest uppercase text-gold mb-4">The Tiers</p>
-            <h2 className="font-display text-3xl text-linen mb-8">Three levels of the game.</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              {[
-                {
-                  tier: 'Fan',
-                  price: '₹1,499',
-                  desc: 'Entry-level quality. Wearable, durable, and fan-grade — for cheering from the stands.',
-                },
-                {
-                  tier: 'Authentic',
-                  price: '₹2,999',
-                  desc: 'Performance dry-fit with official badge quality. The kit you wear when the game matters.',
-                  highlight: true,
-                },
-                {
-                  tier: 'Player',
-                  price: '₹4,999',
-                  desc: 'Match-grade fabric, body-mapped construction, serialised certificate. Wear it like a pro.',
-                },
-              ].map(t => (
-                <div
-                  key={t.tier}
-                  className={`rounded-2xl border p-6 ${t.highlight ? 'border-gold/40 bg-gold/5' : 'border-border bg-surface'}`}
-                >
-                  <p className="font-display text-2xl text-linen mb-1">{t.tier}</p>
-                  <p className="text-gold text-sm font-body mb-4">{t.price}</p>
-                  <p className="text-muted text-sm font-body leading-relaxed">{t.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </AnimatedSection>
-
         {/* Fan platform */}
         <AnimatedSection>
           <div className="bg-night border border-border rounded-2xl p-8 sm:p-10">

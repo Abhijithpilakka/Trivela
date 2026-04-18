@@ -21,8 +21,15 @@ export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-  const { user, loading, signOut } = useAuth()
+  const { user, loading, signOut, needsOnboarding } = useAuth()
   const pathname = usePathname()
+
+  // Auto-open modal if user logged in via Google but hasn't completed onboarding
+  useEffect(() => {
+    if (!loading && needsOnboarding) {
+      setAuthOpen(true)
+    }
+  }, [needsOnboarding, loading])
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40)

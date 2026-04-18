@@ -136,9 +136,9 @@ export const MOCK_TRIVIA: TriviaQuestion[] = [
 
 export const KIT_TIERS: KitTier[] = [
   {
-    name: 'Fan',
-    price: '₹1,499',
-    badge: 'Entry',
+    name: 'Fan Version',
+    price: '₹799',
+    badge: 'Casual Wear',
     features: [
       'Polyester blend fabric',
       'Club crest embroidery',
@@ -148,13 +148,13 @@ export const KIT_TIERS: KitTier[] = [
     ],
   },
   {
-    name: 'Authentic',
-    price: '₹2,999',
+    name: 'Player Version',
+    price: '₹899',
     badge: 'Popular',
     highlight: true,
     features: [
       'Performance dry-fit fabric',
-      'Player number printing',
+      'Heat-pressed graphics',
       'Slim athletic fit',
       'Moisture-wicking tech',
       'Official badge quality',
@@ -162,16 +162,16 @@ export const KIT_TIERS: KitTier[] = [
     ],
   },
   {
-    name: 'Player',
-    price: '₹4,999',
-    badge: 'Premium',
+    name: 'Retro Edition',
+    price: '₹599',
+    badge: 'Heritage',
     features: [
-      'Match-grade Aeroswift fabric',
-      'Heat-transferred graphics',
-      'Body-mapped construction',
-      'Pro-athlete fit',
-      'Serialised certificate',
-      'Gift packaging',
+      'Polyester Fabric',
+      'Embroidery Logo',
+      'Sublimated Graphics',
+      'Relaxed Fit',
+      'Player Names & Numbers',
+      'Football Heritage Designs',
     ],
   },
 ]
