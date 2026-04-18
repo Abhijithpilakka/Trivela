@@ -42,10 +42,12 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   async function handleGoogleAuth() {
     setLoading(true)
     setError('')
+    const callbackBase = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+    const callbackUrl = `${callbackBase.replace(/\/$/, '')}/auth/callback`
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: callbackUrl,
         queryParams: { access_type: 'offline', prompt: 'consent' },
       },
     })

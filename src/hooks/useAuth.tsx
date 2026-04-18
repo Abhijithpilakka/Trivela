@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react'
 import { User as SupabaseUser, Session } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase'
 import { User } from '@/types'
@@ -34,10 +34,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
 
-  // Create client once — stable reference
+  // Use singleton client — never re-create inside render
   const supabase = createClient()
+  // Track if component is still mounted to avoid state updates after unmount
+  const mounted = useRef(true)
 
-  async function fetchOrCreateProfile(sbUser: SupabaseUser) {
+  async function fetchOrCreateProfile(sbUser: SupabaseUser): Promise<void> {
     try {
       const { data, error } = await supabase
         .from('users')
@@ -45,53 +47,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', sbUser.id)
         .single()
 
+      if (!mounted.current) return
+
       if (data) {
         setUser(data as User)
-        // Needs onboarding if fan_name or supported_club is empty
-        setNeedsOnboarding(!data.fan_name || !data.supported_club)
+        // Needs onboarding if either field is blank
+        setNeedsOnboarding(!data.fan_name?.trim() || !data.supported_club?.trim())
         return
       }
 
-      // Row doesn't exist yet — insert it
+      // PGRST116 = row not found
       if (error?.code === 'PGRST116') {
         const newProfile = {
           id: sbUser.id,
           email: sbUser.email ?? '',
-          fan_name: sbUser.user_metadata?.full_name?.split(' ')[0] ?? '',
+          fan_name: sbUser.user_metadata?.full_name?.split(' ')[0]?.trim() ?? '',
           supported_club: '',
           xp: 0,
           level: 1,
         }
-        const { data: inserted } = await supabase
+
+        const { data: inserted, error: insertErr } = await supabase
           .from('users')
           .insert(newProfile)
           .select()
           .single()
 
+        if (!mounted.current) return
+
         if (inserted) {
           setUser(inserted as User)
         } else {
-          // Fallback: use auth data directly so UI shows logged in
-          setUser({ ...newProfile, created_at: new Date().toISOString() } as User)
+          // Insert failed (maybe duplicate from trigger) — try fetching again
+          if (insertErr?.code === '23505') {
+            // Unique violation — row was created by trigger, fetch it
+            const { data: existing } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', sbUser.id)
+              .single()
+            if (existing && mounted.current) setUser(existing as User)
+          } else {
+            // Fallback: use auth data so UI doesn't break
+            setUser({ ...newProfile, created_at: new Date().toISOString() } as User)
+          }
         }
         setNeedsOnboarding(true)
         return
       }
 
-      // Any other error (e.g. table missing) — still show as logged in
-      setUser({
-        id: sbUser.id,
-        email: sbUser.email ?? '',
-        fan_name: sbUser.user_metadata?.full_name?.split(' ')[0] ?? '',
-        supported_club: '',
-        xp: 0,
-        level: 1,
-        created_at: new Date().toISOString(),
-      } as User)
-      setNeedsOnboarding(true)
+      // Any other error — show as logged in with minimal data
+      if (mounted.current) {
+        setUser({
+          id: sbUser.id,
+          email: sbUser.email ?? '',
+          fan_name: '',
+          supported_club: '',
+          xp: 0,
+          level: 1,
+          created_at: new Date().toISOString(),
+        } as User)
+        setNeedsOnboarding(true)
+      }
 
     } catch (e) {
-      console.warn('fetchOrCreateProfile failed:', e)
+      console.warn('fetchOrCreateProfile error:', e)
+      // Don't leave loading forever
+      if (mounted.current) setLoading(false)
     }
   }
 
@@ -101,64 +123,115 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function completeOnboarding(fanName: string, club: string) {
     if (!supabaseUser) return
-    const { data } = await supabase
+
+    const { data, error } = await supabase
       .from('users')
-      .upsert({
-        id: supabaseUser.id,
-        email: supabaseUser.email ?? '',
-        fan_name: fanName.trim(),
-        supported_club: club,
-        xp: 0,
-        level: 1,
-      })
+      .upsert(
+        {
+          id: supabaseUser.id,
+          email: supabaseUser.email ?? '',
+          fan_name: fanName.trim(),
+          supported_club: club,
+          xp: user?.xp ?? 0,
+          level: user?.level ?? 1,
+        },
+        { onConflict: 'id' }
+      )
       .select()
       .single()
 
-    if (data) setUser(data as User)
-    setNeedsOnboarding(false)
+    if (error) {
+      console.error('completeOnboarding error:', error)
+      throw new Error(error.message)
+    }
+
+    if (data && mounted.current) {
+      setUser(data as User)
+      setNeedsOnboarding(false)
+    }
   }
 
   useEffect(() => {
-    // getUser() is more reliable than getSession() for initial load after OAuth
-    supabase.auth.getUser().then(({ data: { user: sbUser } }) => {
-      if (sbUser) {
-        setSupabaseUser(sbUser)
-        // Also grab the session for the context
-        supabase.auth.getSession().then(({ data: { session } }) => {
-          setSession(session)
-        })
-        fetchOrCreateProfile(sbUser).finally(() => setLoading(false))
-      } else {
-        setLoading(false)
-      }
-    })
+    mounted.current = true
 
-    // Listen for future auth changes (sign in, sign out, token refresh)
+    async function init() {
+      try {
+        const [userResult, sessionResult] = await Promise.allSettled([
+          supabase.auth.getUser(),
+          supabase.auth.getSession(),
+        ])
+
+        const sbUser =
+          userResult.status === 'fulfilled' ? userResult.value.data.user : null
+        const session =
+          sessionResult.status === 'fulfilled' ? sessionResult.value.data.session : null
+
+        if (!mounted.current) return
+
+        if (session) setSession(session)
+
+        const activeUser = sbUser ?? session?.user ?? null
+        if (activeUser) {
+          setSupabaseUser(activeUser)
+          await fetchOrCreateProfile(activeUser)
+        }
+      } catch (e) {
+        console.warn('Auth init error:', e)
+      } finally {
+        if (mounted.current) setLoading(false)
+      }
+    }
+
+    init()
+
+    // Listen for sign-in / sign-out / token refresh events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!mounted.current) return
+
         setSession(session)
         const sbUser = session?.user ?? null
         setSupabaseUser(sbUser)
 
-        if (sbUser) {
-          await fetchOrCreateProfile(sbUser)
-        } else {
+        if (event === 'SIGNED_OUT') {
           setUser(null)
           setNeedsOnboarding(false)
+          setLoading(false)
+          return
         }
-        setLoading(false)
+
+        if (sbUser) {
+          await fetchOrCreateProfile(sbUser)
+        }
+
+        if (mounted.current) setLoading(false)
       }
     )
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted.current = false
+      subscription.unsubscribe()
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function signOut() {
-    await supabase.auth.signOut()
-    setUser(null)
-    setSupabaseUser(null)
-    setSession(null)
-    setNeedsOnboarding(false)
+    setLoading(true)
+    try {
+      await supabase.auth.signOut()
+    } catch (error) {
+      console.warn('signOut error:', error)
+    } finally {
+      if (mounted.current) {
+        setUser(null)
+        setSupabaseUser(null)
+        setSession(null)
+        setNeedsOnboarding(false)
+        setLoading(false)
+      }
+      if (typeof window !== 'undefined') {
+        window.location.replace(window.location.origin)
+      }
+    }
   }
 
   return (

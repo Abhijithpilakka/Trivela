@@ -7,29 +7,32 @@ export async function GET(request: NextRequest) {
   const next = searchParams.get('next') ?? '/'
 
   if (!code) {
-    console.error('No code in callback URL')
+    console.error('No code in OAuth callback')
     return NextResponse.redirect(`${origin}/auth/error`)
   }
 
-  // We need to set cookies on the response, so create response first
-  const response = NextResponse.redirect(`${origin}${next}`)
+  // Build the redirect response first so we can set cookies on it
+  const callbackBase = process.env.NEXT_PUBLIC_APP_URL || origin
+  const redirectUrl = `${callbackBase.replace(/\/$/, '')}${next}`
+  let response = NextResponse.redirect(redirectUrl)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
+        getAll() {
+          return request.cookies.getAll()
         },
-        set(name: string, value: string, options: Record<string, unknown>) {
-          // Set on both request (for this handler) and response (for the browser)
-          request.cookies.set({ name, value, ...(options as object) })
-          response.cookies.set({ name, value, ...(options as object) })
-        },
-        remove(name: string, options: Record<string, unknown>) {
-          request.cookies.set({ name, value: '', ...(options as object) })
-          response.cookies.set({ name, value: '', ...(options as object) })
+        setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
+          // Set on both request and response
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          )
+          response = NextResponse.redirect(redirectUrl)
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          )
         },
       },
     }
@@ -37,25 +40,19 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
-  if (error) {
-    console.error('exchangeCodeForSession error:', error.message)
+  if (error || !data.user) {
+    console.error('exchangeCodeForSession failed:', error?.message)
     return NextResponse.redirect(`${origin}/auth/error`)
   }
 
-  if (!data.user) {
-    console.error('No user after code exchange')
-    return NextResponse.redirect(`${origin}/auth/error`)
-  }
-
-  // Try to upsert the user profile.
-  // This may fail if the table doesn't exist yet — that's OK,
-  // the client-side useAuth hook handles the fallback.
+  // Profile row will be created by the DB trigger (handle_new_user).
+  // We also try here as a safety net — errors are non-fatal.
   try {
     await supabase.from('users').upsert(
       {
         id: data.user.id,
         email: data.user.email ?? '',
-        fan_name: data.user.user_metadata?.full_name?.split(' ')[0] ?? '',
+        fan_name: data.user.user_metadata?.full_name?.split(' ')[0]?.trim() ?? '',
         supported_club: '',
         xp: 0,
         level: 1,
@@ -63,10 +60,9 @@ export async function GET(request: NextRequest) {
       { onConflict: 'id', ignoreDuplicates: true }
     )
   } catch (e) {
-    // Silently continue — client will handle onboarding
-    console.warn('Profile upsert skipped:', e)
+    // Non-fatal — client will handle onboarding
+    console.warn('Profile upsert in callback:', e)
   }
 
-  // Successful — redirect to the originally requested page (or home)
   return response
 }
