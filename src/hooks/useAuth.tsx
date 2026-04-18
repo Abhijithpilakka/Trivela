@@ -154,17 +154,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true
 
+    async function withTimeout<T>(promise: Promise<T>, timeout = 5000): Promise<T | null> {
+      let timer: ReturnType<typeof setTimeout>
+      const timeoutPromise = new Promise<null>(resolve => {
+        timer = setTimeout(() => resolve(null), timeout)
+      })
+      const result = await Promise.race([promise, timeoutPromise])
+      clearTimeout(timer!)
+      return result as T | null
+    }
+
     async function init() {
       try {
-        const [userResult, sessionResult] = await Promise.allSettled([
-          supabase.auth.getUser(),
-          supabase.auth.getSession(),
+        const [userResult, sessionResult] = await Promise.all([
+          withTimeout(supabase.auth.getUser()),
+          withTimeout(supabase.auth.getSession()),
         ])
 
-        const sbUser =
-          userResult.status === 'fulfilled' ? userResult.value.data.user : null
-        const session =
-          sessionResult.status === 'fulfilled' ? sessionResult.value.data.session : null
+        const sbUser = userResult?.data?.user ?? null
+        const session = sessionResult?.data?.session ?? null
 
         if (!mounted.current) return
 
