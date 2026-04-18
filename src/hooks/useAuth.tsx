@@ -166,26 +166,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function init() {
       try {
-        const [userResult, sessionResult] = await Promise.all([
-          withTimeout(supabase.auth.getUser()),
-          withTimeout(supabase.auth.getSession()),
-        ])
+        // First try to get session from cookies (most reliable after OAuth)
+        const userResult = await withTimeout(supabase.auth.getUser())
+        const sessionResult = await withTimeout(supabase.auth.getSession())
 
         const sbUser = userResult?.data?.user ?? null
         const session = sessionResult?.data?.session ?? null
 
         if (!mounted.current) return
 
-        if (session) setSession(session)
+        if (session) {
+          setSession(session)
+          setSupabaseUser(session.user)
+        }
 
+        // If we found a user, fetch their profile
         const activeUser = sbUser ?? session?.user ?? null
         if (activeUser) {
           setSupabaseUser(activeUser)
           await fetchOrCreateProfile(activeUser)
+        } else {
+          // No session found
+          setLoading(false)
         }
       } catch (e) {
         console.warn('Auth init error:', e)
-      } finally {
         if (mounted.current) setLoading(false)
       }
     }
@@ -197,19 +202,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async (event, session) => {
         if (!mounted.current) return
 
+        console.log('Auth state changed:', event)
         setSession(session)
-        const sbUser = session?.user ?? null
-        setSupabaseUser(sbUser)
 
         if (event === 'SIGNED_OUT') {
           setUser(null)
+          setSupabaseUser(null)
           setNeedsOnboarding(false)
           setLoading(false)
           return
         }
 
-        if (sbUser) {
-          await fetchOrCreateProfile(sbUser)
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          const sbUser = session?.user ?? null
+          setSupabaseUser(sbUser)
+          if (sbUser) {
+            await fetchOrCreateProfile(sbUser)
+          }
         }
 
         if (mounted.current) setLoading(false)

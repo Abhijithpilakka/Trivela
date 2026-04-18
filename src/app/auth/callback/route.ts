@@ -14,7 +14,6 @@ export async function GET(request: NextRequest) {
   // Build the redirect response first so we can set cookies on it
   const callbackBase = process.env.NEXT_PUBLIC_APP_URL || origin
   const redirectUrl = `${callbackBase.replace(/\/$/, '')}${next}`
-  let response = NextResponse.redirect(redirectUrl)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,14 +24,10 @@ export async function GET(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
-          // Set on both request and response
-          cookiesToSet.forEach(({ name, value }) =>
+          // Store cookies on request so we can apply them to response later
+          cookiesToSet.forEach(({ name, value }) => {
             request.cookies.set(name, value)
-          )
-          response = NextResponse.redirect(redirectUrl)
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          )
+          })
         },
       },
     }
@@ -63,6 +58,13 @@ export async function GET(request: NextRequest) {
     // Non-fatal — client will handle onboarding
     console.warn('Profile upsert in callback:', e)
   }
+
+  // Build response and copy ALL cookies from request (including those set by exchangeCodeForSession)
+  const response = NextResponse.redirect(redirectUrl)
+
+  request.cookies.getAll().forEach(({ name, value }) => {
+    response.cookies.set(name, value)
+  })
 
   return response
 }
